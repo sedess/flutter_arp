@@ -47,6 +47,11 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  void _showARP() {
+      // final arpLib = ArpLibrary();
+      ArpLibrary().getArpTable();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -57,6 +62,11 @@ class _MyAppState extends State<MyApp> {
         body: Center(
           child: Text('Running on: $_platformVersion\n'),
         ),
+        floatingActionButton: FloatingActionButton(
+        onPressed: _showARP,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
       ),
     );
   }

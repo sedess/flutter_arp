@@ -51,8 +51,8 @@ class ArpLibrary {
       final ipList = List.generate(4, (index) => entry.ip[index]);
       final macList = List.generate(6, (index) => entry.mac[index]);
 
-      final ip = formatIp(ipList);
-      final mac = formatMac(macList);
+      final ip = ipList.take(4).map((b) => (b & 0xFF).toString()).join('.');
+      final mac = macList.take(6).map((b) => (b & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase()).join('-');
 
       print('IP Address: $ip, MAC Address: $mac');
     }
@@ -60,23 +60,13 @@ class ArpLibrary {
     calloc.free(countPtr);
   }
 
-  String formatIp(List<int> bytes) {
-    // Filtrar solo los primeros 4 bytes para la dirección IP
-    return bytes.take(4).map((b) => (b & 0xFF).toString()).join('.');
-  }
-
-  String formatMac(List<int> bytes) {
-    // Filtrar solo los primeros 6 bytes para la dirección MAC
-    return bytes.take(6).map((b) => (b & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase()).join('-');
-  }
-
   void _macImplementation() async {
     // Asegúrate de que este nombre coincida con el nombre en tu AppDelegate.swift
-    const platform = MethodChannel('com.example.app/arp');
+    const platform = MethodChannel('flutter_arp');
     final arpData = await platform.invokeMethod('getArpTable');
-    for (var entry in arpData) {
-      Uint8List ipBytes = entry['ip']; // Uint8List para IP
-      Uint8List macBytes = entry['mac']; // Uint8List para MAC
+    for (Map entry in arpData) {
+      List<int> ipBytes = (entry['ip'] as List).cast<int>(); // Uint8List para IP
+      List<int> macBytes = (entry['mac'] as List).cast<int>(); // Uint8List para MAC
 
       // Convertir los bytes a un formato legible, si lo necesitas:
       String ipAddress = ipBytes.join('.');
