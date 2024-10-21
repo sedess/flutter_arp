@@ -37,7 +37,7 @@ class ArpLibrary {
   }
 
   void _windowsImplementation() {
-    final lib = DynamicLibrary.open('arp_library.dll');
+    final lib = DynamicLibrary.open('../arp_library.dll');
     final getArpTableFunc = lib.lookup<NativeFunction<_GetArpTableFunc>>('getArpTable').asFunction<_GetArpTable>();
 
     final countPtr = calloc<Int32>();
