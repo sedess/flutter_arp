@@ -5,6 +5,7 @@
 // platforms in the `pubspec.yaml` at
 // https://flutter.dev/docs/development/packages-and-plugins/developing-packages#plugin-platforms.
 
+import 'package:flutter/foundation.dart';
 import 'flutter_arp_platform_interface.dart';
 import 'dart:ffi';
 import 'dart:io';
@@ -17,10 +18,10 @@ class FlutterArp {
   }
 }
 
-typedef _GetArpTableFunc = Pointer<ArpEntry> Function(Pointer<Int32>);
-typedef _GetArpTable = Pointer<ArpEntry> Function(Pointer<Int32>);
+typedef _GetArpTableFunc = Pointer<_ArpEntry> Function(Pointer<Int32>);
+typedef _GetArpTable = Pointer<_ArpEntry> Function(Pointer<Int32>);
 
-final class ArpEntry extends Struct {
+final class _ArpEntry extends Struct {
   @Array(4)
   external Array<Int8> ip;
 
@@ -28,51 +29,118 @@ final class ArpEntry extends Struct {
   external Array<Int8> mac;
 }
 
-class ArpLibrary {
-  ArpLibrary();
+abstract class ArpLibrary {
 
-  void getArpTable() {
-    if (Platform.isWindows) _windowsImplementation();
-    if (Platform.isMacOS) _macImplementation();
+  static Future<ArpTable> getArpTable() async {
+    if (Platform.isWindows) return _windowsImplementation();
+    if (Platform.isMacOS) return await _macImplementation();
+    throw UnimplementedError();
   }
 
-  void _windowsImplementation() {
-    final lib = DynamicLibrary.open('../arp_library.dll');
+  static ArpTable _windowsImplementation() {
+    final lib = DynamicLibrary.open('arp_library.dll');
     final getArpTableFunc = lib.lookup<NativeFunction<_GetArpTableFunc>>('getArpTable').asFunction<_GetArpTable>();
 
     final countPtr = calloc<Int32>();
     final entriesPtr = getArpTableFunc(countPtr);
     final count = countPtr.value;
 
+    final arpTable = ArpTable();
+
     for (int i = 0; i < count; i++) {
-      final entry = (entriesPtr + i).ref;
+      try {
 
-      // Convierte el Array<Int8> a List<int> y luego a String
-      final ipList = List.generate(4, (index) => entry.ip[index]);
-      final macList = List.generate(6, (index) => entry.mac[index]);
+        final entry = (entriesPtr + i).ref;
 
-      final ip = ipList.take(4).map((b) => (b & 0xFF).toString()).join('.');
-      final mac = macList.take(6).map((b) => (b & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase()).join('-');
+        // Convierte el Array<Int8> a List<int> y luego a String
+        final ipList = List.generate(4, (index) => entry.ip[index]);
+        final macList = List.generate(6, (index) => entry.mac[index]);
 
-      print('IP Address: $ip, MAC Address: $mac');
+        final ip = _formatIp(ipList);
+        final mac = _formatMac(macList);
+        // print('IP Address: $ip, MAC Address: $mac');
+
+        arpTable._addEntry(ip, mac);
+      } catch (e, stack) {
+        debugPrint('Failed to parse arp entry due to: $e');
+        debugPrint('Stack trace: $stack');
+      }
+
     }
 
     calloc.free(countPtr);
+
+    return arpTable;
   }
 
-  void _macImplementation() async {
+  static String _formatIp(List<int> bytes) {
+    // Filtrar solo los primeros 4 bytes para la dirección IP
+    return bytes.take(4).map((b) => (b & 0xFF).toString()).join('.');
+  }
+
+  static String _formatMac(List<int> bytes) {
+    // Filtrar solo los primeros 6 bytes para la dirección MAC
+    return bytes.take(6).map((b) => (b & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
+  }
+
+  static Future<ArpTable> _macImplementation() async {
     // Asegúrate de que este nombre coincida con el nombre en tu AppDelegate.swift
     const platform = MethodChannel('flutter_arp');
     final arpData = await platform.invokeMethod('getArpTable');
-    for (Map entry in arpData) {
-      List<int> ipBytes = (entry['ip'] as List).cast<int>(); // Uint8List para IP
-      List<int> macBytes = (entry['mac'] as List).cast<int>(); // Uint8List para MAC
+    
+    final arpTable = ArpTable();
+    
+    for (var entry in arpData) {
+      try {
+        final rawIp = entry['ip'];
+        final rawMac = entry['mac'];
 
-      // Convertir los bytes a un formato legible, si lo necesitas:
-      String ipAddress = ipBytes.join('.');
-      String macAddress = macBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+        if (rawIp is! List || rawIp.isEmpty) continue;
+        if (rawMac is! List || rawMac.isEmpty) continue;
 
-      print('IP Address: $ipAddress, MAC Address: $macAddress');
+        List<int> ipBytes = List.generate(4, (index) => rawIp[index]);
+        List<int> macBytes = List.generate(6, (index) => rawMac[index]);
+        // Uint8List ipBytes = entry['ip']; // Uint8List para IP
+        // Uint8List macBytes = entry['mac']; // Uint8List para MAC
+
+        // Convertir los bytes a un formato legible, si lo necesitas:
+        // String ipAddress = ipBytes.join('.');
+        // String macAddress = macBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+        String ipAddress = _formatIp(ipBytes);
+        String macAddress = _formatMac(macBytes);
+
+        // print('IP Address: $ipAddress, MAC Address: $macAddress');
+
+        arpTable._addEntry(ipAddress, macAddress);
+
+      } catch (e, stack) {
+        debugPrint('Failed to parse arp entry due to: $e');
+        debugPrint('Stack trace: $stack');
+      }
     }
+
+    return arpTable;
   }
 }
+
+class ArpTable {
+  final Map<String, ArpTableEntry> byMacMap = {};
+  final Map<String, ArpTableEntry> byIpMap = {};
+  final List<ArpTableEntry> entriesList = [];
+
+  void _addEntry(String ipAddress, String macAddress) {
+    final entry = ArpTableEntry(ipAddress, macAddress);
+    byIpMap[ipAddress] = entry;
+    byMacMap[macAddress] = entry;
+    entriesList.add(entry);
+  }
+
+}
+
+class ArpTableEntry {
+  final String ipAddress;
+  final String macAddress;
+
+  ArpTableEntry(this.ipAddress, this.macAddress);
+}
+
